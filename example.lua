@@ -1,13 +1,38 @@
 -- OrcaUI Example Script
 -- Run this in Potassium (or any executor) to see the library in action.
 
-local OrcaUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua"))()
--- Or if running locally: local OrcaUI = require(path.to.OrcaUI)
+local OrcaUI = nil
 
-if not OrcaUI then
-    warn("[OrcaUI] Failed to load OrcaUI module. Check your internet or file path.")
+-- Try to load the library safely
+local ok, result = pcall(function()
+    -- Check if required functions exist
+    if not loadstring then
+        error("loadstring is not available in this executor")
+    end
+    if not game or not game.HttpGet then
+        error("game.HttpGet is not available in this executor")
+    end
+
+    local code = game:HttpGet("https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua")
+    if not code or code == "" then
+        error("Failed to fetch OrcaUI.lua from GitHub (empty response)")
+    end
+
+    local chunk = loadstring(code)
+    if not chunk then
+        error("OrcaUI.lua has a syntax error and could not be compiled")
+    end
+
+    return chunk()
+end)
+
+if not ok or not result then
+    warn("[OrcaUI] Failed to load: " .. tostring(result or "unknown error"))
+    warn("[OrcaUI] Make sure you are running this in a supported executor (Potassium, Synapse X, etc.)")
     return
 end
+
+OrcaUI = result
 
 -- Register Lucid icon ImageIds (upload your lucide decals and put their rbxassetid:// here)
 -- Example:
