@@ -140,7 +140,6 @@ end
 
 local function Tween(instance, properties, duration, easingStyle, easingDirection)
     if not instance then return nil end
-    if not instance:IsA("Instance") then return nil end
     duration = duration or Config.TweenTime
     easingStyle = easingStyle or Config.TweenEasing
     easingDirection = easingDirection or Config.TweenDirection
@@ -334,6 +333,9 @@ function OrcaUI:GetIcon(name)
     if not name then return "" end
     return self.IconMap[name] or ""
 end
+
+-- // Section (forward declaration so Window can reference it)
+local Section = {}
 
 -- // Window
 local Window = {}
@@ -570,7 +572,7 @@ function Window:_SetupDrag(dragFrame, targetFrame)
     end)
 
     dragFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.TouchMovement then
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
             dragInput = input
         end
     end)
@@ -667,6 +669,13 @@ function Window:CreateTab(options)
     tab.Text = btnText
     tab.Window = self
 
+    -- Attach CreateSection method to the tab
+    function tab:CreateSection(sectionOptions)
+        sectionOptions = sectionOptions or {}
+        sectionOptions.Parent = self
+        return Section:Create(sectionOptions)
+    end
+
     if not self.ActiveTab then
         self:SetActiveTab(tab)
     end
@@ -686,14 +695,17 @@ function Window:SetActiveTab(tab)
         if self.ActiveTab.Button then
             Tween(self.ActiveTab.Button, {BackgroundTransparency = 1}, 0.15)
         end
-        if self.ActiveTab.Button and self.ActiveTab.Button.Text then
-            Tween(self.ActiveTab.Button.Text, {TextColor3 = Theme.TextDim}, 0.15)
+        local oldText = self.ActiveTab.Button:FindFirstChild("Text")
+        if oldText then
+            Tween(oldText, {TextColor3 = Theme.TextDim}, 0.15)
         end
-        if self.ActiveTab.Button and self.ActiveTab.Button.Icon then
-            Tween(self.ActiveTab.Button.Icon, {ImageColor3 = Theme.TextDim}, 0.15)
+        local oldIcon = self.ActiveTab.Button:FindFirstChild("Icon")
+        if oldIcon then
+            Tween(oldIcon, {ImageColor3 = Theme.TextDim}, 0.15)
         end
-        if self.ActiveTab.Button and self.ActiveTab.Button.AccentBar then
-            self.ActiveTab.Button.AccentBar.Visible = false
+        local oldAccent = self.ActiveTab.Button:FindFirstChild("AccentBar")
+        if oldAccent then
+            oldAccent.Visible = false
         end
     end
 
@@ -705,14 +717,17 @@ function Window:SetActiveTab(tab)
     if tab.Button then
         Tween(tab.Button, {BackgroundTransparency = 0.85}, 0.15)
     end
-    if tab.Button and tab.Button.Text then
-        Tween(tab.Button.Text, {TextColor3 = Theme.Text}, 0.15)
+    local newText = tab.Button:FindFirstChild("Text")
+    if newText then
+        Tween(newText, {TextColor3 = Theme.Text}, 0.15)
     end
-    if tab.Button and tab.Button.Icon then
-        Tween(tab.Button.Icon, {ImageColor3 = self.Accent}, 0.15)
+    local newIcon = tab.Button:FindFirstChild("Icon")
+    if newIcon then
+        Tween(newIcon, {ImageColor3 = self.Accent}, 0.15)
     end
-    if tab.Button and tab.Button.AccentBar then
-        tab.Button.AccentBar.Visible = true
+    local newAccent = tab.Button:FindFirstChild("AccentBar")
+    if newAccent then
+        newAccent.Visible = true
     end
 end
 
@@ -738,7 +753,7 @@ function Window:Destroy()
 end
 
 -- // Section
-local Section = {}
+Section = {}
 Section.__index = Section
 
 function Section:Create(options)
@@ -1164,7 +1179,7 @@ function Section:CreateSlider(options)
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.TouchMovement) then
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local rel = input.Position.X - track.AbsolutePosition.X
             local pct = math.clamp(rel / track.AbsoluteSize.X, 0, 1)
             setValue(min + pct * (max - min))
