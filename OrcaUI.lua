@@ -29,6 +29,26 @@ OrcaUI.__index = OrcaUI
 OrcaUI.Version = "1.0.0"
 OrcaUI.Debug = false
 
+-- // Registry: track all created windows for cleanup
+OrcaUI.Windows = {}
+
+-- // Destroy all existing OrcaUI windows (unloads previous script instance)
+function OrcaUI:DestroyAll()
+    for _, window in pairs(self.Windows) do
+        if window and window.Container then
+            pcall(function() window.Container:Destroy() end)
+        end
+    end
+    self.Windows = {}
+end
+
+-- // Auto-unload previous instance when this script runs again
+local previousOrcaUI = _G.OrcaUI
+if previousOrcaUI and previousOrcaUI.DestroyAll then
+    previousOrcaUI:DestroyAll()
+end
+_G.OrcaUI = OrcaUI
+
 -- // Services
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
