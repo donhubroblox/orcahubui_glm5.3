@@ -8,15 +8,21 @@
     - Sidebar navigation with tabs + search bar
     - Lucid icon support (register your own lucid decal ImageIds)
     - Executor-compatible: no external HTTP, no getcustomasset required
-    - Tween-based animations, responsive-ish layout
+    - Tween-based animations, nil-safe
 
     Usage:
-        local OrcaUI = loadstring(game:HttpGet("...OrcaUI.lua"))()
+        local OrcaUI = loadstring(game:HttpGet("YOUR_RAW_URL/OrcaUI.lua"))()
         local Window = OrcaUI:CreateWindow({Name = "OrcaUI", Size = UDim2.new(0, 700, 0, 450)})
         local Tab = Window:CreateTab({Name = "Main", Icon = "Home"})
         local Section = Tab:CreateSection({Name = "Main Features"})
         Section:CreateToggle({Name = "Godmode", Default = false, Callback = function(v) print(v) end})
 --]]
+
+-- // Guard: ensure we are running in a Roblox environment
+if not game or not game:GetService then
+    warn("[OrcaUI] OrcaUI must be run inside a Roblox executor.")
+    return nil
+end
 
 local OrcaUI = {}
 OrcaUI.__index = OrcaUI
@@ -32,7 +38,7 @@ local CoreGui = game:GetService("CoreGui")
 local TextService = game:GetService("TextService")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local PlayerGui = LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui") or CoreGui
 
 -- // Theme
 local Theme = {
@@ -78,18 +84,31 @@ local Config = {
 
 -- // Utilities
 local function Create(className, properties)
-    local instance = Instance.new(className)
-    for prop, value in pairs(properties or {}) do
-        if prop == "Children" then
-            for _, child in ipairs(value) do
-                child.Parent = instance
-            end
-        else
-            local ok, err = pcall(function()
-                instance[prop] = value
-            end)
-            if not ok then
-                warn("[OrcaUI] Failed to set " .. tostring(prop) .. " on " .. className .. ": " .. tostring(err))
+    local ok, instance = pcall(function() return Instance.new(className) end)
+    if not ok or not instance then
+        warn("[OrcaUI] Failed to create " .. tostring(className))
+        return nil
+    end
+    if properties then
+        for prop, value in pairs(properties) do
+            if prop == "Children" then
+                if type(value) == "table" then
+                    for _, child in ipairs(value) do
+                        if child and child.Parent then
+                            -- child already has a parent, reparent
+                        end
+                        if child then
+                            child.Parent = instance
+                        end
+                    end
+                end
+            else
+                local setOk, setErr = pcall(function()
+                    instance[prop] = value
+                end)
+                if not setOk then
+                    warn("[OrcaUI] Failed to set " .. tostring(prop) .. " on " .. className .. ": " .. tostring(setErr))
+                end
             end
         end
     end
@@ -97,6 +116,7 @@ local function Create(className, properties)
 end
 
 local function Tween(instance, properties, duration, easingStyle, easingDirection)
+    if not instance then return nil end
     duration = duration or Config.TweenTime
     easingStyle = easingStyle or Config.TweenEasing
     easingDirection = easingDirection or Config.TweenDirection
@@ -106,50 +126,44 @@ local function Tween(instance, properties, duration, easingStyle, easingDirectio
 end
 
 local function GetScreenGui(name)
-    local gui = PlayerGui:FindFirstChild(name)
+    if not name then return nil end
+    local targetGui = PlayerGui or CoreGui
+    if not targetGui then return nil end
+    local gui = targetGui:FindFirstChild(name)
     if not gui then
         gui = Create("ScreenGui", {
             Name = name,
             ResetOnSpawn = false,
             ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-            Parent = PlayerGui,
         })
-        local ok = pcall(function() gui.Parent = CoreGui end)
-        if not ok then
-            gui.Parent = PlayerGui
+        if gui then
+            local setOk = pcall(function() gui.Parent = targetGui end)
+            if not setOk then
+                gui.Parent = CoreGui
+            end
         end
     end
     return gui
 end
 
-local function SetZIndex(instance, index)
-    for _, obj in ipairs(instance:GetDescendants()) do
-        if obj:IsA("GuiObject") then
-            obj.ZIndex = index
-        end
-    end
-    if instance:IsA("GuiObject") then
-        instance.ZIndex = index
-    end
-end
-
 local function RoundCorners(instance, radius)
+    if not instance then return nil end
     radius = radius or Config.ElementRadius
-    local corner = Create("UICorner", {CornerRadius = radius, Parent = instance})
-    return corner
+    return Create("UICorner", {CornerRadius = radius, Parent = instance})
 end
 
 local function AddStroke(instance, color, thickness)
+    if not instance then return nil end
     thickness = thickness or 1
-    local stroke = Create("UIStroke", {
+    return Create("UIStroke", {
         Color = color or Theme.Border,
         Thickness = thickness,
         Parent = instance,
     })
-    return stroke
 end
 
 local function AddListLayout(instance, padding)
+    if not instance then return nil end
     padding = padding or UDim.new(0, 8)
     return Create("UIListLayout", {
         Padding = padding,
@@ -159,6 +173,7 @@ local function AddListLayout(instance, padding)
 end
 
 local function AddPadding(instance, left, top, right, bottom)
+    if not instance then return nil end
     left = left or UDim.new(0, 12)
     top = top or UDim.new(0, 10)
     right = right or UDim.new(0, 12)
@@ -170,8 +185,6 @@ local function AddPadding(instance, left, top, right, bottom)
 end
 
 -- // Lucid Icons
--- Lucid (lucide.dev) SVG path data is provided for reference / custom rendering.
--- To actually display icons, register ImageIds via OrcaUI:RegisterIcon(name, "rbxassetid://...").
 OrcaUI.IconMap = {}
 OrcaUI.LucidIcons = {
     Layout     = "M3 2v18h18V2H3zm18-2h-3v3h3V0zm0 20h-3v3h3V20zm-18 0h-3v3h3V2zM20 20H3v-3h17v3z",
@@ -187,7 +200,7 @@ OrcaUI.LucidIcons = {
     Zap        = "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
     Heart      = "M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7l-1.682-1.682a4.5 4.5 0 00-6.364 0z",
     Star       = "M12 17.25L17.818 21.12l-2.682-6.763L19 9.75l-6.763-2.682L12 3l-3.236 4.082L5 9.75l4.868 4.582L6.182 21.12z",
-    Play       = "M14.752 11.168l-3.12 2.436c-.291.227-.291.637 0 .864l3.12 2.436c.655.512 1.712.512 2.368 0l3.12-2.436c.291-.227.291-.637 0-.864L17.12 3.032c-.656-.512-1.713-.512-2.368 0z",
+    Play       = "M14.752 11.168l-3.12 2.436c-.291.227-.291.637 0 .864l3.12 2.436c.655.512 1.712 .512 2.368 0l3.12-2.436c.291-.227.291-.637 0-.864L17.12 3.032c-.656-.512-1.713-.512-2.368 0z",
     Stop       = "M8 10h8v8H8z",
     Lock       = "M12 15v4c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v7z",
     Key        = "M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.778-7.778zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4",
@@ -197,7 +210,7 @@ OrcaUI.LucidIcons = {
     Moon       = "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z",
     Sun        = "M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.34-.02-.67-.05-1",
     Cloud      = "M18 10h-1.26A8 8 0 009 4c0-1.11-.24-2.16-.64-3.11l-.67-1.56-.66-1.55A2 2 0 005 0a2 2 0 00-2 2c0 .92.49 1.7 1.22 2.11l.35.2A2 2 0 004 6c0 1.11.89 2 2 2h1.55l-.22.49c-.27.6-.44 1.28-.44 2h0c0 2.21 1.79 4 4 4h0c1.11 0 2.08-.36 2.88-1a4 4 0 001.12-2.67l.21-.52z",
-    Wifi       = "M3.055 17.056A9 9 0 0112 5c4.971 0 9.027 3.672 9.027 8.2s-4.056 8.2-9.027 8.2c-1.238 0-2.383-.28-3.389-.789a1 1 0 111.264-1.532c.892.449 1.878.702 2.966.702s2.074-.253 2.966-.702a1 1 0 111.264 1.532c-1.006.509-2.151.789-3.389.789-4.971 0-9.027-3.672-9.027-8.2s4.056-8.2 9.027-8.2a1 1 0 110 2c-4.971 0-9.027 3.672-9.027-8.2s4.056-8.2 9.027-8.2z",
+    Wifi       = "M3.055 17.056A9 9 0 0112 5c4.971 0 9.027 3.672 9.027 8.2s-4.056 8.2-9.027 8.2c-1.238 0-2.383-.28-3.389-.789a1 1 0 111.264-1.532c.892.449 1.878.702 2.966.702s2.074-.253 2.966-.702a1 1 0 111.264 1.532c-1.006.509-2.151.789-3.389.789-4.971 0-9.027-3.672-9.027-8.2s4.056-8.2 9.027-8.2z",
     Copy       = "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v8a2 2 0 002 2z",
     Edit       = "M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7",
     Trash      = "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16",
@@ -212,7 +225,7 @@ OrcaUI.LucidIcons = {
     ArrowLeft  = "M19 12H5M12 19l7-7-7-7",
     ArrowUp    = "M12 19V5M5 12l7-7 7 7",
     ArrowDown  = "M5 14l7 7 7-7M12 5v14",
-    HelpCircle = "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM13 16h-1v-4h-1m1-4.6h-2.6c-.4 0-.8.3-.8.8v1.4c0 .4.3.8.8.8h2.6c.4 0 .8-.3.8-.8v-1.4c0-.4-.4-.8-.8-.8z",
+    HelpCircle = "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM13 16h-1v-4h-1m1-4.6h-2.6c-.4 0-.8.3-.8.8v1.4c0 .4.3 .8 .8 .8h2.6c.4 0 .8-.3 .8-.8v-1.4c0-.4-.4-.8-.8-.8z",
     Info       = "M13 16h-1v-4h-1m1-4.8l-1 1.4L12 16l1-1.4z",
     Mail       = "M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z",
     File       = "M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z",
@@ -283,10 +296,12 @@ OrcaUI.LucidIcons = {
 }
 
 function OrcaUI:RegisterIcon(name, imageId)
+    if not name then return end
     self.IconMap[name] = imageId
 end
 
 function OrcaUI:GetIcon(name)
+    if not name then return "" end
     return self.IconMap[name] or ""
 end
 
@@ -295,18 +310,27 @@ local Window = {}
 Window.__index = Window
 
 function OrcaUI:CreateWindow(options)
+    if not OrcaUI then
+        warn("[OrcaUI] OrcaUI module is nil. Did you load it correctly?")
+        return nil
+    end
+
     options = options or {}
     local self = setmetatable({}, Window)
 
     self.Name = options.Name or "OrcaUI"
     self.Size = options.Size or UDim2.new(0, 700, 0, 480)
-    self.Position = options.Position or UDim2.new(0.5, -self.Size.X.Offset/2, 0.5, -self.Size.Y.Offset/2)
+    self.Position = options.Position or UDim2.new(0.5, -self.Size.X.Offset / 2, 0.5, -self.Size.Y.Offset / 2)
     self.ShowSearchBar = options.ShowSearchBar ~= false
     self.Accent = options.Accent or Theme.Accent
 
     local gui = GetScreenGui("OrcaUI_" .. self.Name)
+    if not gui then
+        warn("[OrcaUI] Failed to create ScreenGui.")
+        return nil
+    end
 
-    -- Main window
+    -- Main window container
     self.Container = Create("Frame", {
         Name = "OrcaWindow",
         Size = self.Size,
@@ -314,11 +338,9 @@ function OrcaUI:CreateWindow(options)
         BackgroundColor3 = Theme.Background,
         BorderSizePixel = 0,
         Parent = gui,
-        Children = {
-            RoundCorners(nil, Config.CornerRadius), -- placeholder, set below
-            AddStroke(nil, Theme.Border),
-        },
     })
+    if not self.Container then return nil end
+
     RoundCorners(self.Container, Config.CornerRadius)
     AddStroke(self.Container, Theme.Border, 1)
 
@@ -329,14 +351,11 @@ function OrcaUI:CreateWindow(options)
         BackgroundColor3 = Theme.Surface,
         BorderSizePixel = 0,
         Parent = self.Container,
-        Children = {
-            RoundCorners(nil, UDim.new(0, 8)),
-            AddPadding(nil, UDim.new(0, 14), UDim.new(0, 0), UDim.new(0, 12), UDim.new(0, 0)),
-        },
     })
     RoundCorners(self.TopBar, UDim.new(0, 8))
+    AddPadding(self.TopBar, UDim.new(0, 14), UDim.new(0, 0), UDim.new(0, 12), UDim.new(0, 0))
 
-    -- Logo / title
+    -- Title
     self.TitleLabel = Create("TextLabel", {
         Name = "Title",
         Size = UDim2.new(0, 200, 1, 0),
@@ -349,17 +368,15 @@ function OrcaUI:CreateWindow(options)
         Parent = self.TopBar,
     })
 
-    -- Window control buttons (minimize/close)
+    -- Controls (minimize/close)
     self.Controls = Create("Frame", {
         Name = "Controls",
         Size = UDim2.new(0, 70, 1, 0),
         BackgroundTransparency = 1,
         Position = UDim2.new(1, -70, 0, 0),
         Parent = self.TopBar,
-        Children = {
-            AddPadding(nil, UDim.new(0, 8), UDim.new(0, 0), UDim.new(0, 8), UDim.new(0, 0)),
-        },
     })
+    AddPadding(self.Controls, UDim.new(0, 8), UDim.new(0, 0), UDim.new(0, 8), UDim.new(0, 0))
 
     self.MinBtn = Create("TextButton", {
         Name = "Minimize",
@@ -370,7 +387,6 @@ function OrcaUI:CreateWindow(options)
         TextSize = 16,
         Font = Config.Font,
         Parent = self.Controls,
-        Children = { RoundCorners(nil, UDim.new(0, 6)) },
     })
     RoundCorners(self.MinBtn, UDim.new(0, 6))
 
@@ -379,12 +395,11 @@ function OrcaUI:CreateWindow(options)
         Size = UDim2.new(0, 24, 0, 24),
         BackgroundColor3 = Theme.Danger,
         Text = "×",
-        TextColor3 = Color3.new(1,1,1),
+        TextColor3 = Color3.new(1, 1, 1),
         TextSize = 16,
         Font = Config.Font,
         Position = UDim2.new(0, 34, 0, 0),
         Parent = self.Controls,
-        Children = { RoundCorners(nil, UDim.new(0, 6)) },
     })
     RoundCorners(self.CloseBtn, UDim.new(0, 6))
 
@@ -396,12 +411,9 @@ function OrcaUI:CreateWindow(options)
             BackgroundColor3 = Theme.SurfaceElev,
             Position = UDim2.new(1, -300, 0, 4),
             Parent = self.TopBar,
-            Children = {
-                RoundCorners(nil, UDim.new(0, 8)),
-                AddPadding(nil, UDim.new(0, 10), UDim.new(0, 0), UDim.new(0, 8), UDim.new(0, 0)),
-            },
         })
         RoundCorners(self.SearchBar, UDim.new(0, 8))
+        AddPadding(self.SearchBar, UDim.new(0, 10), UDim.new(0, 0), UDim.new(0, 8), UDim.new(0, 0))
 
         self.SearchIcon = Create("ImageLabel", {
             Name = "SearchIcon",
@@ -429,7 +441,7 @@ function OrcaUI:CreateWindow(options)
         })
     end
 
-    -- Content area (below top bar)
+    -- Content area
     self.Content = Create("Frame", {
         Name = "Content",
         Size = UDim2.new(1, 0, 1, -40),
@@ -445,14 +457,11 @@ function OrcaUI:CreateWindow(options)
         BackgroundColor3 = Theme.Sidebar,
         BorderSizePixel = 0,
         Parent = self.Content,
-        Children = {
-            RoundCorners(nil, UDim.new(0, 0)),
-            AddListLayout(nil, UDim.new(0, 6)),
-            AddPadding(nil, UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10)),
-        },
     })
+    RoundCorners(self.Sidebar, UDim.new(0, 0))
+    AddListLayout(self.Sidebar, UDim.new(0, 6))
+    AddPadding(self.Sidebar, UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10))
 
-    -- Sidebar logo
     self.SidebarLogo = Create("TextLabel", {
         Name = "SidebarLogo",
         Size = UDim2.new(1, -20, 0, 32),
@@ -465,7 +474,6 @@ function OrcaUI:CreateWindow(options)
         Parent = self.Sidebar,
     })
 
-    -- Tab list container
     self.TabList = Create("ScrollingFrame", {
         Name = "TabList",
         Size = UDim2.new(1, -8, 1, -42),
@@ -476,13 +484,11 @@ function OrcaUI:CreateWindow(options)
         ScrollBarImageColor3 = Theme.TextMuted,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         Parent = self.Sidebar,
-        Children = {
-            AddListLayout(nil, UDim.new(0, 4)),
-            AddPadding(nil, UDim.new(0, 4), UDim.new(0, 0), UDim.new(0, 4), UDim.new(0, 0)),
-        },
     })
+    AddListLayout(self.TabList, UDim.new(0, 4))
+    AddPadding(self.TabList, UDim.new(0, 4), UDim.new(0, 0), UDim.new(0, 4), UDim.new(0, 0))
 
-    -- Main area (tabs content)
+    -- Main area
     self.MainArea = Create("Frame", {
         Name = "MainArea",
         Size = UDim2.new(1, -170, 1, 0),
@@ -516,10 +522,12 @@ function OrcaUI:CreateWindow(options)
 
     OrcaUI.Windows = OrcaUI.Windows or {}
     OrcaUI.Windows[self.Container] = self
+
     return self
 end
 
 function Window:_SetupDrag(dragFrame, targetFrame)
+    if not dragFrame or not targetFrame then return end
     local dragging = false
     local dragInput, mousePos, framePos
 
@@ -551,14 +559,17 @@ function Window:_SetupDrag(dragFrame, targetFrame)
 end
 
 function Window:CreateTab(options)
+    if not self then return nil end
     options = options or {}
-    local tab = setmetatable({}, {__index = {
-        Name = options.Name or "Tab",
-        Icon = options.Icon or "Layout",
-        Sections = {},
-        SectionOrder = {},
-        Visible = false,
-    }})
+    local tab = setmetatable({}, {
+        __index = {
+            Name = options.Name or "Tab",
+            Icon = options.Icon or "Layout",
+            Sections = {},
+            SectionOrder = {},
+            Visible = false,
+        }
+    })
 
     local order = #self.TabOrder + 1
     table.insert(self.TabOrder, tab)
@@ -617,14 +628,9 @@ function Window:CreateTab(options)
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         Parent = self.TabContainer,
         Visible = false,
-        Children = {
-            AddListLayout(nil, UDim.new(0, 12)),
-            AddPadding(nil, UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14)),
-        },
     })
-
-    local sectionList = AddListLayout(content, UDim.new(0, 12))
-    local sectionPad = AddPadding(content, UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14))
+    AddListLayout(content, UDim.new(0, 12))
+    AddPadding(content, UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14), UDim.new(0, 14))
 
     btn.MouseButton1Click:Connect(function()
         self:SetActiveTab(tab)
@@ -637,7 +643,6 @@ function Window:CreateTab(options)
     tab.Text = btnText
     tab.Window = self
 
-    -- Auto-select first tab
     if not self.ActiveTab then
         self:SetActiveTab(tab)
     end
@@ -647,38 +652,65 @@ function Window:CreateTab(options)
 end
 
 function Window:SetActiveTab(tab)
+    if not self or not tab then return end
     if self.ActiveTab == tab then return end
     if self.ActiveTab then
         self.ActiveTab.Visible = false
-        self.ActiveTab.Content.Visible = false
-        Tween(self.ActiveTab.Button, {BackgroundTransparency = 1}, 0.15)
-        Tween(self.ActiveTab.Button.Text, {TextColor3 = Theme.TextDim}, 0.15)
-        Tween(self.ActiveTab.Button.Icon, {ImageColor3 = Theme.TextDim}, 0.15)
-        self.ActiveTab.Button.AccentBar.Visible = false
+        if self.ActiveTab.Content then
+            self.ActiveTab.Content.Visible = false
+        end
+        if self.ActiveTab.Button then
+            Tween(self.ActiveTab.Button, {BackgroundTransparency = 1}, 0.15)
+        end
+        if self.ActiveTab.Button and self.ActiveTab.Button.Text then
+            Tween(self.ActiveTab.Button.Text, {TextColor3 = Theme.TextDim}, 0.15)
+        end
+        if self.ActiveTab.Button and self.ActiveTab.Button.Icon then
+            Tween(self.ActiveTab.Button.Icon, {ImageColor3 = Theme.TextDim}, 0.15)
+        end
+        if self.ActiveTab.Button and self.ActiveTab.Button.AccentBar then
+            self.ActiveTab.Button.AccentBar.Visible = false
+        end
     end
 
     self.ActiveTab = tab
     tab.Visible = true
-    tab.Content.Visible = true
-    Tween(tab.Button, {BackgroundTransparency = 0.85}, 0.15)
-    Tween(tab.Button.Text, {TextColor3 = Theme.Text}, 0.15)
-    Tween(tab.Button.Icon, {ImageColor3 = self.Accent}, 0.15)
-    tab.Button.AccentBar.Visible = true
+    if tab.Content then
+        tab.Content.Visible = true
+    end
+    if tab.Button then
+        Tween(tab.Button, {BackgroundTransparency = 0.85}, 0.15)
+    end
+    if tab.Button and tab.Button.Text then
+        Tween(tab.Button.Text, {TextColor3 = Theme.Text}, 0.15)
+    end
+    if tab.Button and tab.Button.Icon then
+        Tween(tab.Button.Icon, {ImageColor3 = self.Accent}, 0.15)
+    end
+    if tab.Button and tab.Button.AccentBar then
+        tab.Button.AccentBar.Visible = true
+    end
 end
 
 function Window:Minimize()
-    self.Container.Visible = false
+    if self and self.Container then
+        self.Container.Visible = false
+    end
 end
 
 function Window:Restore()
-    self.Container.Visible = true
+    if self and self.Container then
+        self.Container.Visible = true
+    end
 end
 
 function Window:Destroy()
-    if self.Container then
+    if self and self.Container then
         self.Container:Destroy()
     end
-    OrcaUI.Windows[self.Container] = nil
+    if OrcaUI.Windows and self.Container then
+        OrcaUI.Windows[self.Container] = nil
+    end
 end
 
 -- // Section
@@ -686,38 +718,33 @@ local Section = {}
 Section.__index = Section
 
 function Section:Create(options)
+    if not options then return nil end
     options = options or {}
     local self = setmetatable({}, Section)
 
     self.Name = options.Name or "Section"
-    self.Side = options.Side or "Left"
 
-    -- Section card
+    local parentContent = options.Parent and options.Parent.Content
     self.Card = Create("Frame", {
         Name = self.Name .. "Section",
         Size = UDim2.new(0.5, -6, 0, 40),
         BackgroundColor3 = Theme.Surface,
         BorderSizePixel = 0,
-        Parent = options.Parent.Content,
-        Children = {
-            RoundCorners(nil, Config.CornerRadius),
-            AddStroke(nil, Theme.Border),
-            AddPadding(nil, UDim.new(0, 12), UDim.new(0, 10), UDim.new(0, 12), UDim.new(0, 10)),
-        },
+        Parent = parentContent,
     })
+    if not self.Card then return nil end
+
     RoundCorners(self.Card, Config.CornerRadius)
     AddStroke(self.Card, Theme.Border, 1)
+    AddPadding(self.Card, UDim.new(0, 12), UDim.new(0, 10), UDim.new(0, 12), UDim.new(0, 10))
 
-    -- Header
     self.Header = Create("Frame", {
         Name = "Header",
         Size = UDim2.new(1, 0, 0, 24),
         BackgroundTransparency = 1,
         Parent = self.Card,
-        Children = {
-            AddPadding(nil, UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 4)),
-        },
     })
+    AddPadding(self.Header, UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 4))
 
     local headerLayout = Create("UIListLayout", {
         FillDirection = Enum.FillDirection.Horizontal,
@@ -726,7 +753,7 @@ function Section:Create(options)
     })
 
     if options.Icon then
-        local icon = Create("ImageLabel", {
+        Create("ImageLabel", {
             Name = "Icon",
             Size = UDim2.new(0, 16, 0, 16),
             BackgroundTransparency = 1,
@@ -762,23 +789,21 @@ function Section:Create(options)
         Parent = self.Card,
     })
 
-    -- Elements container
     self.Elements = Create("Frame", {
         Name = "Elements",
         Size = UDim2.new(1, 0, 1, -30),
         Position = UDim2.new(0, 0, 0, 30),
         BackgroundTransparency = 1,
         Parent = self.Card,
-        Children = {
-            AddListLayout(nil, UDim.new(0, 8)),
-        },
     })
+    AddListLayout(self.Elements, UDim.new(0, 8))
 
     self.ElementCount = 0
     return self
 end
 
 function Section:_SizeCard()
+    if not self.Elements then return end
     local layout = self.Elements:FindFirstChildOfClass("UIListLayout")
     if layout then
         local h = layout.AbsoluteContentSize.Y + 30 + 20
@@ -789,21 +814,20 @@ end
 -- // Elements
 
 function Section:CreateToggle(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local default = options.Default or false
     local callback = options.Callback or function() end
 
     local row = Create("Frame", {
-        Name = options.Name .. "Toggle",
+        Name = (options.Name or "Toggle") .. "ToggleRow",
         Size = UDim2.new(1, 0, 0, 32),
         BackgroundTransparency = 1,
         Parent = self.Elements,
-        Children = {
-            AddPadding(nil, UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 0), UDim.new(0, 0)),
-        },
     })
+    if not row then return nil end
 
-    local layout = Create("UIListLayout", {
+    Create("UIListLayout", {
         FillDirection = Enum.FillDirection.Horizontal,
         VerticalAlignment = Enum.VerticalAlignment.Center,
         Parent = row,
@@ -845,7 +869,6 @@ function Section:CreateToggle(options)
         BorderSizePixel = 0,
         Position = UDim2.new(1, -40, 0.5, -9),
         Parent = row,
-        Children = { RoundCorners(nil, UDim.new(1, 0)) },
     })
     RoundCorners(toggle, UDim.new(1, 0))
     AddStroke(toggle, default and Theme.Accent or Theme.Border)
@@ -854,10 +877,9 @@ function Section:CreateToggle(options)
         Name = "Knob",
         Size = UDim2.new(0, 16, 0, 16),
         Position = default and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-        BackgroundColor3 = Color3.new(1,1,1),
+        BackgroundColor3 = Color3.new(1, 1, 1),
         BorderSizePixel = 0,
         Parent = toggle,
-        Children = { RoundCorners(nil, UDim.new(1, 0)) },
     })
     RoundCorners(knob, UDim.new(1, 0))
 
@@ -870,7 +892,6 @@ function Section:CreateToggle(options)
         local knobPos = value and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
         Tween(toggle, {BackgroundColor3 = color}, 0.15)
         Tween(knob, {Position = knobPos}, 0.15)
-        -- restroke
         for _, child in ipairs(toggle:GetChildren()) do
             if child:IsA("UIStroke") then
                 Tween(child, {Color = strokeColor}, 0.15)
@@ -897,15 +918,17 @@ function Section:CreateToggle(options)
 end
 
 function Section:CreateButton(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local callback = options.Callback or function() end
 
     local row = Create("Frame", {
-        Name = options.Name .. "Button",
+        Name = (options.Name or "Button") .. "ButtonRow",
         Size = UDim2.new(1, 0, 0, 34),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     local btn = Create("TextButton", {
         Name = "Button",
@@ -915,13 +938,12 @@ function Section:CreateButton(options)
         BorderSizePixel = 0,
         AutoButtonColor = false,
         Parent = row,
-        Children = { RoundCorners(nil, Config.ElementRadius) },
     })
     RoundCorners(btn, Config.ElementRadius)
     AddStroke(btn, Theme.Border)
 
     if options.Icon then
-        local icon = Create("ImageLabel", {
+        Create("ImageLabel", {
             Name = "Icon",
             Size = UDim2.new(0, 16, 0, 16),
             Position = UDim2.new(0, 10, 0.5, -8),
@@ -975,6 +997,7 @@ function Section:CreateButton(options)
 end
 
 function Section:CreateSlider(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local min = options.Min or 0
     local max = options.Max or 100
@@ -984,13 +1007,14 @@ function Section:CreateSlider(options)
     default = math.clamp(default, min, max)
 
     local row = Create("Frame", {
-        Name = options.Name .. "Slider",
+        Name = (options.Name or "Slider") .. "SliderRow",
         Size = UDim2.new(1, 0, 0, 44),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
-    local layout = Create("UIListLayout", {
+    Create("UIListLayout", {
         FillDirection = Enum.FillDirection.Vertical,
         Parent = row,
     })
@@ -1000,16 +1024,12 @@ function Section:CreateSlider(options)
         Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
         Parent = row,
-        Children = {
-            Create("UIListLayout", {
-                FillDirection = Enum.FillDirection.Horizontal,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-                Parent = row, -- will reparent below
-            }),
-        },
     })
-    -- fix layout parent
-    header:FindFirstChildOfClass("UIListLayout").Parent = header
+    Create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        Parent = header,
+    })
 
     if options.Icon then
         Create("ImageLabel", {
@@ -1057,7 +1077,6 @@ function Section:CreateSlider(options)
         BackgroundColor3 = Theme.SurfaceElev,
         BorderSizePixel = 0,
         Parent = row,
-        Children = { RoundCorners(nil, UDim.new(1, 0)) },
     })
     RoundCorners(track, UDim.new(1, 0))
 
@@ -1067,7 +1086,6 @@ function Section:CreateSlider(options)
         BackgroundColor3 = Theme.Accent,
         BorderSizePixel = 0,
         Parent = track,
-        Children = { RoundCorners(nil, UDim.new(1, 0)) },
     })
     RoundCorners(fill, UDim.new(1, 0))
 
@@ -1075,10 +1093,9 @@ function Section:CreateSlider(options)
         Name = "Knob",
         Size = UDim2.new(0, 14, 0, 14),
         Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7),
-        BackgroundColor3 = Color3.new(1,1,1),
+        BackgroundColor3 = Color3.new(1, 1, 1),
         BorderSizePixel = 0,
         Parent = track,
-        Children = { RoundCorners(nil, UDim.new(1, 0)) },
     })
     RoundCorners(knob, UDim.new(1, 0))
     AddStroke(knob, Theme.Border)
@@ -1145,6 +1162,7 @@ function Section:CreateSlider(options)
 end
 
 function Section:CreateDropdown(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local optionsList = options.Options or {}
     local default = options.Default or optionsList[1] or ""
@@ -1152,11 +1170,12 @@ function Section:CreateDropdown(options)
     local multi = options.Multi or false
 
     local row = Create("Frame", {
-        Name = options.Name .. "Dropdown",
+        Name = (options.Name or "Dropdown") .. "DropdownRow",
         Size = UDim2.new(1, 0, 0, 34),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     local btn = Create("TextButton", {
         Name = "Button",
@@ -1166,7 +1185,6 @@ function Section:CreateDropdown(options)
         BorderSizePixel = 0,
         AutoButtonColor = false,
         Parent = row,
-        Children = { RoundCorners(nil, Config.ElementRadius) },
     })
     RoundCorners(btn, Config.ElementRadius)
     AddStroke(btn, Theme.Border)
@@ -1219,7 +1237,6 @@ function Section:CreateDropdown(options)
         Parent = btn,
     })
 
-    -- Dropdown list
     local list = Create("Frame", {
         Name = "List",
         Size = UDim2.new(1, 0, 0, #optionsList * 26 + 6),
@@ -1228,15 +1245,11 @@ function Section:CreateDropdown(options)
         BorderSizePixel = 0,
         Visible = false,
         Parent = row,
-        Children = {
-            RoundCorners(nil, Config.ElementRadius),
-            AddStroke(nil, Theme.Border),
-            AddListLayout(nil, UDim.new(0, 2)),
-            AddPadding(nil, UDim.new(0, 4), UDim.new(0, 4), UDim.new(0, 4), UDim.new(0, 4)),
-        },
     })
     RoundCorners(list, Config.ElementRadius)
     AddStroke(list, Theme.Border, 1)
+    AddListLayout(list, UDim.new(0, 2))
+    AddPadding(list, UDim.new(0, 4), UDim.new(0, 4), UDim.new(0, 4), UDim.new(0, 4))
 
     local open = false
 
@@ -1271,7 +1284,6 @@ function Section:CreateDropdown(options)
             BorderSizePixel = 0,
             AutoButtonColor = false,
             Parent = list,
-            Children = { RoundCorners(nil, UDim.new(0, 4)) },
         })
         RoundCorners(optBtn, UDim.new(0, 4))
 
@@ -1281,7 +1293,7 @@ function Section:CreateDropdown(options)
             Position = UDim2.new(0, 4, 0, 0),
             BackgroundTransparency = 1,
             Text = tostring(opt),
-            TextColor3 = selected == opt and Color3.new(1,1,1) or Theme.Text,
+            TextColor3 = selected == opt and Color3.new(1, 1, 1) or Theme.Text,
             TextSize = 12,
             Font = Config.Font,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -1309,14 +1321,13 @@ function Section:CreateDropdown(options)
                 selected = table.concat(sel, ", ")
                 valueLabel.Text = selected
                 callback(selected)
-                -- refresh bg colors
                 for _, c in ipairs(list:GetChildren()) do
                     if c:IsA("TextButton") then
                         local t = c:FindFirstChild("Text")
                         local optName = t and t.Text or ""
                         local isSel = selectedSet[optName] == true
                         c.BackgroundColor3 = isSel and Theme.Accent or Theme.SurfaceElev
-                        t.TextColor3 = isSel and Color3.new(1,1,1) or Theme.Text
+                        t.TextColor3 = isSel and Color3.new(1, 1, 1) or Theme.Text
                     end
                 end
             else
@@ -1330,21 +1341,12 @@ function Section:CreateDropdown(options)
                         local optName = t and t.Text or ""
                         local isSel = optName == opt
                         c.BackgroundColor3 = isSel and Theme.Accent or Theme.SurfaceElev
-                        t.TextColor3 = isSel and Color3.new(1,1,1) or Theme.Text
+                        t.TextColor3 = isSel and Color3.new(1, 1, 1) or Theme.Text
                     end
                 end
             end
         end)
     end
-
-    -- Click outside to close
-    UserInputService.InputBegan:Connect(function(input)
-        if open and input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local mouse = UserInputService:GetMouseLocation()
-            -- simple check: if not over list or btn, close
-            -- (good enough for basic)
-        end
-    end)
 
     self.ElementCount = self.ElementCount + 1
     self:_SizeCard()
@@ -1368,17 +1370,19 @@ function Section:CreateDropdown(options)
 end
 
 function Section:CreateTextbox(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local default = options.Default or ""
     local placeholder = options.Placeholder or ""
     local callback = options.Callback or function() end
 
     local row = Create("Frame", {
-        Name = options.Name .. "Textbox",
+        Name = (options.Name or "Textbox") .. "TextboxRow",
         Size = UDim2.new(1, 0, 0, 34),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     if options.Icon then
         Create("ImageLabel", {
@@ -1418,7 +1422,6 @@ function Section:CreateTextbox(options)
         Font = Config.Font,
         BorderSizePixel = 0,
         Parent = row,
-        Children = { RoundCorners(nil, UDim.new(0, 6)) },
     })
     RoundCorners(box, UDim.new(0, 6))
     AddStroke(box, Theme.Border)
@@ -1445,15 +1448,17 @@ function Section:CreateTextbox(options)
 end
 
 function Section:CreateLabel(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local text = options.Text or options.Name or "Label"
 
     local row = Create("Frame", {
-        Name = options.Name .. "Label",
+        Name = (options.Name or "Label") .. "LabelRow",
         Size = UDim2.new(1, 0, 0, 20),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     if options.Icon then
         Create("ImageLabel", {
@@ -1497,16 +1502,18 @@ function Section:CreateLabel(options)
 end
 
 function Section:CreateKeybind(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local default = options.Default or Enum.KeyCode.Unknown
     local callback = options.Callback or function() end
 
     local row = Create("Frame", {
-        Name = options.Name .. "Keybind",
+        Name = (options.Name or "Keybind") .. "KeybindRow",
         Size = UDim2.new(1, 0, 0, 32),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     if options.Icon then
         Create("ImageLabel", {
@@ -1544,7 +1551,6 @@ function Section:CreateKeybind(options)
         Font = Config.Font,
         BorderSizePixel = 0,
         Parent = row,
-        Children = { RoundCorners(nil, UDim.new(0, 6)) },
     })
     RoundCorners(keyBtn, UDim.new(0, 6))
     AddStroke(keyBtn, Theme.Border)
@@ -1587,16 +1593,18 @@ function Section:CreateKeybind(options)
 end
 
 function Section:CreateColorpicker(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local default = options.Default or Color3.new(1, 1, 1)
     local callback = options.Callback or function() end
 
     local row = Create("Frame", {
-        Name = options.Name .. "Colorpicker",
+        Name = (options.Name or "Colorpicker") .. "ColorpickerRow",
         Size = UDim2.new(1, 0, 0, 32),
         BackgroundTransparency = 1,
         Parent = self.Elements,
     })
+    if not row then return nil end
 
     if options.Icon then
         Create("ImageLabel", {
@@ -1630,12 +1638,10 @@ function Section:CreateColorpicker(options)
         BackgroundColor3 = default,
         BorderSizePixel = 0,
         Parent = row,
-        Children = { RoundCorners(nil, UDim.new(0, 4)) },
     })
     RoundCorners(colorBox, UDim.new(0, 4))
     AddStroke(colorBox, Theme.Border)
 
-    -- Simple picker popup
     local picker = Create("Frame", {
         Name = "Picker",
         Size = UDim2.new(0, 180, 0, 180),
@@ -1644,10 +1650,6 @@ function Section:CreateColorpicker(options)
         BorderSizePixel = 0,
         Visible = false,
         Parent = row,
-        Children = {
-            RoundCorners(nil, Config.CornerRadius),
-            AddStroke(nil, Theme.Border),
-        },
     })
     RoundCorners(picker, Config.CornerRadius)
     AddStroke(picker, Theme.Border, 1)
@@ -1678,6 +1680,7 @@ function Section:CreateColorpicker(options)
 end
 
 function Section:CreateSeparator()
+    if not self or not self.Elements then return nil end
     local sep = Create("Frame", {
         Name = "Separator",
         Size = UDim2.new(1, 0, 0, 1),
@@ -1691,24 +1694,21 @@ function Section:CreateSeparator()
 end
 
 function Section:CreateParagraph(options)
+    if not self or not self.Elements then return nil end
     options = options or {}
     local title = options.Title or "Paragraph"
     local content = options.Content or ""
 
     local card = Create("Frame", {
-        Name = title .. "Paragraph",
+        Name = title .. "ParagraphCard",
         Size = UDim2.new(1, 0, 0, 70),
         BackgroundColor3 = Theme.Surface,
         BorderSizePixel = 0,
         Parent = self.Elements,
-        Children = {
-            RoundCorners(nil, Config.ElementRadius),
-            AddStroke(nil, Theme.Border),
-            AddPadding(nil, UDim.new(0, 10), UDim.new(0, 8), UDim.new(0, 10), UDim.new(0, 8)),
-        },
     })
     RoundCorners(card, Config.ElementRadius)
     AddStroke(card, Theme.Border, 1)
+    AddPadding(card, UDim.new(0, 10), UDim.new(0, 8), UDim.new(0, 10), UDim.new(0, 8))
 
     local t = Create("TextLabel", {
         Name = "Title",
@@ -1747,6 +1747,7 @@ end
 
 -- // Notifications
 function OrcaUI:Notify(options)
+    if not OrcaUI then return nil end
     options = options or {}
     local title = options.Title or "OrcaUI"
     local text = options.Text or ""
@@ -1761,6 +1762,8 @@ function OrcaUI:Notify(options)
     }
 
     local gui = GetScreenGui("OrcaUI_Notifications")
+    if not gui then return nil end
+
     local notif = Create("Frame", {
         Name = "Notification",
         Size = UDim2.new(0, 260, 0, 70),
@@ -1768,14 +1771,10 @@ function OrcaUI:Notify(options)
         Position = UDim2.new(1, 10, 1, -10),
         AnchorPoint = Vector2.new(1, 1),
         Parent = gui,
-        Children = {
-            RoundCorners(nil, Config.CornerRadius),
-            AddStroke(nil, colors[type] or Theme.Info),
-            AddPadding(nil, UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10)),
-        },
     })
     RoundCorners(notif, Config.CornerRadius)
     AddStroke(notif, colors[type] or Theme.Info, 1)
+    AddPadding(notif, UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10), UDim.new(0, 10))
 
     local bar = Create("Frame", {
         Name = "Bar",
@@ -1783,7 +1782,6 @@ function OrcaUI:Notify(options)
         Position = UDim2.new(0, 0, 0, 10),
         BackgroundColor3 = colors[type] or Theme.Info,
         Parent = notif,
-        Children = { RoundCorners(nil, UDim.new(0, 2)) },
     })
     RoundCorners(bar, UDim.new(0, 2))
 
