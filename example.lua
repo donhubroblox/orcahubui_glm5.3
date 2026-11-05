@@ -2,33 +2,79 @@
 -- Run this in Potassium (or any executor) to see the library in action.
 
 local OrcaUI = nil
+local loadError = nil
 
--- Try to load the library safely
-local ok, result = pcall(function()
-    -- Check if required functions exist
-    if not loadstring then
-        error("loadstring is not available in this executor")
-    end
-    if not game or not game.HttpGet then
-        error("game.HttpGet is not available in this executor")
-    end
-
-    local code = game:HttpGet("https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua")
-    if not code or code == "" then
-        error("Failed to fetch OrcaUI.lua from GitHub (empty response)")
-    end
-
-    local chunk = loadstring(code)
-    if not chunk then
-        error("OrcaUI.lua has a syntax error and could not be compiled")
+-- Try multiple loading methods
+local function loadLibrary()
+    -- Method 1: Local file (for testing)
+    if isfile and isfile("OrcaUI.lua") then
+        local code = readfile("OrcaUI.lua")
+        if code and code ~= "" then
+            local chunk, err = loadstring(code)
+            if chunk then
+                return chunk()
+            else
+                error("loadstring failed: " .. tostring(err))
+            end
+        end
     end
 
-    return chunk()
-end)
+    -- Method 2: game:HttpGet
+    if game and game.HttpGet then
+        local url = "https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua"
+        local code = game:HttpGet(url)
+        if code and code ~= "" then
+            local chunk, err = loadstring(code)
+            if chunk then
+                return chunk()
+            else
+                error("loadstring failed: " .. tostring(err))
+            end
+        else
+            error("game:HttpGet returned empty response")
+        end
+    end
+
+    -- Method 3: syn.request (Synapse X style)
+    if syn and syn.request then
+        local url = "https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua"
+        local resp = syn.request({Url = url, Method = "GET"})
+        if resp and resp.Body then
+            local chunk, err = loadstring(resp.Body)
+            if chunk then
+                return chunk()
+            else
+                error("loadstring failed: " .. tostring(err))
+            end
+        end
+    end
+
+    -- Method 4: http.get
+    if http and http.get then
+        local url = "https://raw.githubusercontent.com/donhubroblox/orcahubui_glm5.3/main/OrcaUI.lua"
+        local code = http.get(url)
+        if code and code ~= "" then
+            local chunk, err = loadstring(code)
+            if chunk then
+                return chunk()
+            else
+                error("loadstring failed: " .. tostring(err))
+            end
+        end
+    end
+
+    error("No loading method available in this executor")
+end
+
+local ok, result = pcall(loadLibrary)
 
 if not ok or not result then
-    warn("[OrcaUI] Failed to load: " .. tostring(result or "unknown error"))
-    warn("[OrcaUI] Make sure you are running this in a supported executor (Potassium, Synapse X, etc.)")
+    loadError = tostring(result or "unknown error")
+    warn("[OrcaUI] Failed to load: " .. loadError)
+    warn("[OrcaUI] Please check:")
+    warn("[OrcaUI] 1. Your executor supports loadstring and HttpGet")
+    warn("[OrcaUI] 2. You have internet access")
+    warn("[OrcaUI] 3. The URL is accessible from your network")
     return
 end
 
@@ -44,7 +90,7 @@ local Window = OrcaUI:CreateWindow({
     Name = "OrcaUI",
     Size = UDim2.new(0, 720, 0, 500),
     Position = UDim2.new(0.5, -360, 0.5, -250),
-    Accent = Color3.fromRGB(99, 102, 241), -- indigo accent (Airflow-inspired purple/blue)
+    Accent = Color3.fromRGB(99, 102, 241),
     ShowSearchBar = true,
 })
 
