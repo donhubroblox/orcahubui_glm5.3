@@ -120,10 +120,17 @@ end
 
 local function Tween(instance, properties, duration, easingStyle, easingDirection)
     if not instance then return nil end
+    if not instance:IsA("Instance") then return nil end
     duration = duration or Config.TweenTime
     easingStyle = easingStyle or Config.TweenEasing
     easingDirection = easingDirection or Config.TweenDirection
-    local tween = TweenService:Create(instance, TweenInfo.new(duration, easingStyle, easingDirection), properties)
+    local ok, tween = pcall(function()
+        return TweenService:Create(instance, TweenInfo.new(duration, easingStyle, easingDirection), properties)
+    end)
+    if not ok or not tween then
+        warn("[OrcaUI] Tween failed: " .. tostring(tween or "unknown error"))
+        return nil
+    end
     tween:Play()
     return tween
 end
